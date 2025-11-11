@@ -15,16 +15,9 @@ MONGODB_PASSWORD = os.getenv("MONGODB_PASSWORD", "admin123")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "energy_efficiency")
 MONGODB_AUTH_SOURCE = os.getenv("MONGODB_AUTH_SOURCE", "admin")
 
+# MongoDB connection URL (for MongoDB Atlas or connection strings)
+# If not provided, will use individual connection parameters for local MongoDB
 MONGODB_URL = os.getenv("MONGODB_URL")
-if not MONGODB_URL:
-    MONGODB_URL = f"mongodb://{MONGODB_USERNAME}:{MONGODB_PASSWORD}@{MONGODB_HOST}:{MONGODB_PORT}/?authSource={MONGODB_AUTH_SOURCE}&directConnection=true"
-elif "authSource" not in MONGODB_URL:
-    if "?" in MONGODB_URL:
-        MONGODB_URL += f"&authSource={MONGODB_AUTH_SOURCE}&directConnection=true"
-    else:
-        MONGODB_URL += f"?authSource={MONGODB_AUTH_SOURCE}&directConnection=true"
-elif "directConnection" not in MONGODB_URL:
-    MONGODB_URL += "&directConnection=true"
 
 
 class Database:
@@ -39,18 +32,31 @@ class Database:
         
         for attempt in range(max_retries):
             try:
-                self.client = MongoClient(
-                    host=MONGODB_HOST,
-                    port=MONGODB_PORT,
-                    username=MONGODB_USERNAME,
-                    password=MONGODB_PASSWORD,
-                    authSource=MONGODB_AUTH_SOURCE,
-                    authMechanism='SCRAM-SHA-256',
-                    directConnection=True,
-                    serverSelectionTimeoutMS=10000,
-                    connectTimeoutMS=10000
-                )
-                self.db = self.client[MONGODB_DB_NAME]
+                # Use MONGODB_URL if provided (for MongoDB Atlas or connection strings)
+                # Otherwise, use individual connection parameters (for local MongoDB)
+                if MONGODB_URL:
+                    # MongoDB Atlas or connection string format
+                    self.client = MongoClient(
+                        MONGODB_URL,
+                        serverSelectionTimeoutMS=10000,
+                        connectTimeoutMS=10000
+                    )
+                    self.db = self.client[MONGODB_DB_NAME]
+                else:
+                    # Local MongoDB with individual parameters
+                    self.client = MongoClient(
+                        host=MONGODB_HOST,
+                        port=MONGODB_PORT,
+                        username=MONGODB_USERNAME,
+                        password=MONGODB_PASSWORD,
+                        authSource=MONGODB_AUTH_SOURCE,
+                        authMechanism='SCRAM-SHA-256',
+                        directConnection=True,
+                        serverSelectionTimeoutMS=10000,
+                        connectTimeoutMS=10000
+                    )
+                    self.db = self.client[MONGODB_DB_NAME]
+                
                 self.client.admin.command('ping')
                 self._create_indexes()
                 return
@@ -58,27 +64,38 @@ class Database:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     continue
-                raise ConnectionFailure(
-                    f"Failed to connect to MongoDB at {MONGODB_HOST}:{MONGODB_PORT} after {max_retries} attempts. "
-                    f"Make sure MongoDB is running: docker-compose up -d"
-                ) from e
+                if MONGODB_URL:
+                    raise ConnectionFailure(
+                        f"Failed to connect to MongoDB after {max_retries} attempts. "
+                        f"Check your MONGODB_URL connection string."
+                    ) from e
+                else:
+                    raise ConnectionFailure(
+                        f"Failed to connect to MongoDB at {MONGODB_HOST}:{MONGODB_PORT} after {max_retries} attempts. "
+                        f"Make sure MongoDB is running: docker-compose up -d"
+                    ) from e
             except OperationFailure as e:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     continue
-                raise OperationFailure(
-                    f"MongoDB authentication failed. "
-                    f"Credentials: username={MONGODB_USERNAME}, authSource={MONGODB_AUTH_SOURCE}. "
-                    f"URL: mongodb://{MONGODB_USERNAME}:***@{MONGODB_HOST}:{MONGODB_PORT}/{MONGODB_DB_NAME}?authSource={MONGODB_AUTH_SOURCE}. "
-                    f"Make sure MongoDB is running and initialized: docker-compose up -d"
-                ) from e
+                if MONGODB_URL:
+                    raise OperationFailure(
+                        f"MongoDB authentication failed. "
+                        f"Check your MONGODB_URL credentials."
+                    ) from e
+                else:
+                    raise OperationFailure(
+                        f"MongoDB authentication failed. "
+                        f"Credentials: username={MONGODB_USERNAME}, authSource={MONGODB_AUTH_SOURCE}. "
+                        f"Make sure MongoDB is running and initialized: docker-compose up -d"
+                    ) from e
             except Exception as e:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     continue
                 raise Exception(
                     f"Unexpected error connecting to MongoDB: {str(e)}. "
-                    f"Make sure MongoDB is running: docker-compose up -d"
+                    f"Check your connection settings."
                 ) from e
             
     def disconnect(self):
