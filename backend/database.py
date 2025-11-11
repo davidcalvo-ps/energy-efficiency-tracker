@@ -36,10 +36,14 @@ class Database:
                 # Otherwise, use individual connection parameters (for local MongoDB)
                 if MONGODB_URL:
                     # MongoDB Atlas or connection string format
+                    # mongodb+srv automatically handles SSL/TLS
+                    # Increase timeouts for better reliability
                     self.client = MongoClient(
                         MONGODB_URL,
-                        serverSelectionTimeoutMS=10000,
-                        connectTimeoutMS=10000
+                        serverSelectionTimeoutMS=30000,
+                        connectTimeoutMS=30000,
+                        socketTimeoutMS=30000,
+                        retryWrites=True
                     )
                     self.db = self.client[MONGODB_DB_NAME]
                 else:
